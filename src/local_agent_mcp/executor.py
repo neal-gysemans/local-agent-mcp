@@ -78,7 +78,16 @@ def run_execution(*, client, model: str, task: str, working_dir: str,
     transcript: list[dict] = []
 
     for turn in range(1, turns + 1):
-        msg = client.chat(model=model, messages=messages, tools=TOOL_DEFS)
+        try:
+            msg = client.chat(model=model, messages=messages, tools=TOOL_DEFS)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "summary": f"Ollama connection error on turn {turn}: {exc}",
+                "files_changed": files_changed,
+                "commands_run": commands_run,
+                "transcript": transcript,
+            }
         tool_calls = msg.get("tool_calls") or []
         messages.append({"role": "assistant", "content": msg.get("content", ""),
                          "tool_calls": tool_calls})
