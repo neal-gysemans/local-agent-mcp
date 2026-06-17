@@ -2,7 +2,7 @@ from typing import Callable, Optional
 
 from . import fs_tools
 
-HARD_TURN_CAP = 3
+HARD_TURN_CAP = 6
 
 TOOL_DEFS = [
     {"type": "function", "function": {
@@ -36,13 +36,15 @@ TOOL_DEFS = [
 def _system_prompt(task: str, allowlist: list[str], max_turns: int) -> str:
     allow = ", ".join(allowlist) if allowlist else "(none — no commands permitted)"
     return (
-        "You are a local execution agent. Implement EXACTLY the task below using the "
-        "provided tools. Stay within the working directory.\n\n"
+        "You are a local execution agent. Your job is to complete the task below by "
+        "calling the provided tools. You MUST use tools — do NOT summarize or respond "
+        "in plain text until you have called the tools needed to complete the task. "
+        "A plain-text response with no tool calls means the task is NOT done.\n\n"
         f"TASK:\n{task}\n\n"
         f"Allowed command patterns: {allow}\n"
-        f"You have at most {max_turns} tool-using turns. When the task is done, or on "
-        "your final turn, reply with a plain-text summary (no tool calls) describing "
-        "what you changed and what, if anything, remains."
+        f"You have at most {max_turns} tool-using turns. Only after all necessary tool "
+        "calls are complete, reply with a plain-text summary (no tool calls) describing "
+        "what you did and what, if anything, remains."
     )
 
 
@@ -93,6 +95,18 @@ def run_execution(*, client, model: str, task: str, working_dir: str,
                          "tool_calls": tool_calls})
 
         if not tool_calls:
+            is_last_turn = turn == turns
+            has_done_work = len(transcript) > 0
+            if not is_last_turn and not has_done_work:
+                progress(f"turn {turn}: no tool calls yet, nudging model")
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You have not used any tools yet. You must call tools to complete "
+                        "the task. Please proceed with the necessary tool calls now."
+                    ),
+                })
+                continue
             progress(f"turn {turn}: final summary")
             return {
                 "status": "completed",
