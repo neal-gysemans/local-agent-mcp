@@ -78,6 +78,7 @@ def run_execution(*, client, model: str, task: str, working_dir: str,
     files_changed: list[str] = []
     commands_run: list[dict] = []
     transcript: list[dict] = []
+    skip_count = 0
 
     for turn in range(1, turns + 1):
         try:
@@ -98,19 +99,35 @@ def run_execution(*, client, model: str, task: str, working_dir: str,
             is_last_turn = turn == turns
             has_done_work = len(transcript) > 0
             if not is_last_turn and not has_done_work:
-                progress(f"turn {turn}: no tool calls yet, nudging model")
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "You have not used any tools yet. You must call tools to complete "
-                        "the task. Please proceed with the necessary tool calls now."
-                    ),
-                })
+                skip_count += 1
+                progress(f"turn {turn}: no tool calls (skip #{skip_count}), nudging model")
+                tool_names = ", ".join(
+                    t["function"]["name"] for t in TOOL_DEFS
+                )
+                if skip_count == 1:
+                    nudge = (
+                        f"You have not called any tools yet. You MUST call a tool to make "
+                        f"progress. Available tools: {tool_names}. Call one now."
+                    )
+                else:
+                    nudge = (
+                        f"STOP. You are ignoring your tools. This is attempt {skip_count}. "
+                        f"Do NOT respond with text. Your ONLY valid response right now is a "
+                        f"tool call. Available tools: {tool_names}. "
+                        f"Call a tool — do not write anything else."
+                    )
+                messages.append({"role": "user", "content": nudge})
                 continue
             progress(f"turn {turn}: final summary")
+            summary = msg.get("content", "")
+            status = "completed" if has_done_work else "unverified"
+            if status == "unverified":
+                summary = (
+                    "[WARNING: no tools were used — task may not be complete] " + summary
+                )
             return {
-                "status": "completed",
-                "summary": msg.get("content", ""),
+                "status": status,
+                "summary": summary,
                 "files_changed": files_changed,
                 "commands_run": commands_run,
                 "transcript": transcript,
